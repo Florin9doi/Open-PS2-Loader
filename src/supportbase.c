@@ -18,13 +18,6 @@
 
 #include "../modules/isofs/zso.h"
 
-/// internal linked list used to populate the list from directory listing
-struct game_list_t
-{
-    base_game_info_t gameinfo;
-    struct game_list_t *next;
-};
-
 struct game_cache_list
 {
     unsigned int count;
@@ -185,43 +178,36 @@ static void freeISOGameListCache(struct game_cache_list *cache)
     }
 }
 
-static int updateISOGameList(const char *path, const struct game_cache_list *cache, const struct game_list_t *head, int count)
+static int updateISOGameList(const char *path, const struct game_cache_list *cache, base_game_info_t *glist, int count)
 {
     char filename[256];
     FILE *file;
-    const struct game_list_t *game;
+    const base_game_info_t *game;
     int result, i, j, modified;
     base_game_info_t *list;
 
     modified = 0;
     if (cache != NULL) {
-        if ((head != NULL) && (count > 0)) {
-            game = head;
-
-            for (i = 0; i < count; i++) {
-                for (j = 0; j < cache->count; j++) {
-                    if (strncmp(cache->games[i].name, game->gameinfo.name, ISO_GAME_NAME_MAX + 1) == 0 && strncmp(cache->games[i].extension, game->gameinfo.extension, ISO_GAME_EXTENSION_MAX + 1) == 0)
-                        break;
-                }
-
-                if (j == cache->count) {
-                    LOG("updateISOGameList: game added.\n");
-                    modified = 1;
+        for (i = 0; i < count; i++) {
+            game = &glist[i];
+            for (j = 0; j < cache->count; j++) {
+                if (strncmp(cache->games[i].name, game->name, ISO_GAME_NAME_MAX + 1) == 0 && strncmp(cache->games[i].extension, game->extension, ISO_GAME_EXTENSION_MAX + 1) == 0)
                     break;
-                }
-
-                game = game->next;
             }
 
-            if ((!modified) && (count != cache->count)) {
-                LOG("updateISOGameList: game removed.\n");
+            if (j == cache->count) {
+                LOG("updateISOGameList: game added.\n");
                 modified = 1;
+                break;
             }
-        } else {
-            modified = 0;
+        }
+
+        if ((!modified) && (count != cache->count)) {
+            LOG("updateISOGameList: game removed.\n");
+            modified = 1;
         }
     } else {
-        modified = ((head != NULL) && (count > 0)) ? 1 : 0;
+        modified = ((glist != NULL) && (count > 0)) ? 1 : 0;
     }
 
     if (!modified)
@@ -230,15 +216,15 @@ static int updateISOGameList(const char *path, const struct game_cache_list *cac
 
     result = 0;
     sprintf(filename, "%s/games.bin", path);
-    if ((head != NULL) && (count > 0)) {
+    if ((glist != NULL) && (count > 0)) {
         list = (base_game_info_t *)memalign(64, sizeof(base_game_info_t) * count);
 
         if (list != NULL) {
             // Convert the linked list into a flat array, for writing performance.
-            game = head;
-            for (i = 0; (i < count) && (game != NULL); i++, game = game->next) {
+            for (i = 0; i < count; i++) {
+                game = &glist[i];
                 // copy one game, advance
-                memcpy(&list[i], &game->gameinfo, sizeof(base_game_info_t));
+                memcpy(&list[i], game, sizeof(base_game_info_t));
             }
 
             file = fopen(filename, "wb");
@@ -281,7 +267,7 @@ static int queryISOGameListCache(const struct game_cache_list *cache, base_game_
     return ENOENT;
 }
 
-static int scanForISO(char *path, char type, struct game_list_t **glist)
+static int scanForISO(char *path, char type, base_game_info_t *glist)
 {
     int NameLen, count = 0, format, MountFD, cacheLoaded;
     struct game_cache_list cache;
@@ -297,56 +283,31 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
     if ((dir = opendir(path)) != NULL) {
         while ((dirent = readdir(dir)) != NULL) {
             if ((format = isValidIsoName(dirent->d_name, &NameLen)) > 0) {
-                base_game_info_t *game;
+                base_game_info_t *game = &glist[count];
 
                 if (NameLen > ISO_GAME_NAME_MAX)
                     continue; // Skip files that cannot be supported properly.
 
                 if (format == GAME_FORMAT_OLD_ISO) {
-                    struct game_list_t *next = (struct game_list_t *)malloc(sizeof(struct game_list_t));
-
-                    if (next != NULL) {
-                        next->next = *glist;
-                        *glist = next;
-
-                        game = &(*glist)->gameinfo;
-                        memset(game, 0, sizeof(base_game_info_t));
-
-                        strncpy(game->name, &dirent->d_name[GAME_STARTUP_MAX], NameLen);
-                        game->name[NameLen] = '\0';
-                        strncpy(game->startup, dirent->d_name, GAME_STARTUP_MAX - 1);
-                        game->startup[GAME_STARTUP_MAX - 1] = '\0';
-                        strncpy(game->extension, &dirent->d_name[GAME_STARTUP_MAX + NameLen], sizeof(game->extension));
-                        game->extension[sizeof(game->extension) - 1] = '\0';
-                    } else {
-                        // Out of memory.
-                        break;
-                    }
+                    memset(game, 0, sizeof(base_game_info_t));
+                    strncpy(game->name, &dirent->d_name[GAME_STARTUP_MAX], NameLen);
+                    game->name[NameLen] = '\0';
+                    strncpy(game->startup, dirent->d_name, GAME_STARTUP_MAX - 1);
+                    game->startup[GAME_STARTUP_MAX - 1] = '\0';
+                    strncpy(game->extension, &dirent->d_name[GAME_STARTUP_MAX + NameLen], sizeof(game->extension));
+                    game->extension[sizeof(game->extension) - 1] = '\0';
                 } else {
                     if (queryISOGameListCache(&cache, &cachedGInfo, dirent->d_name) != 0) {
                         snprintf(fullpath, sizeof(fullpath), "%s/%s", path, dirent->d_name);
 
                         if ((MountFD = fileXioMount("iso:", fullpath, FIO_MT_RDONLY)) >= 0) {
                             if (GetStartupExecName("iso:/SYSTEM.CNF;1", startup, GAME_STARTUP_MAX - 1) == 0) {
-                                struct game_list_t *next = (struct game_list_t *)malloc(sizeof(struct game_list_t));
-
-                                if (next != NULL) {
-                                    next->next = *glist;
-                                    *glist = next;
-
-                                    game = &(*glist)->gameinfo;
-                                    memset(game, 0, sizeof(base_game_info_t));
-
-                                    strcpy(game->startup, startup);
-                                    strncpy(game->name, dirent->d_name, NameLen);
-                                    game->name[NameLen] = '\0';
-                                    strncpy(game->extension, &dirent->d_name[NameLen], sizeof(game->extension));
-                                    game->extension[sizeof(game->extension) - 1] = '\0';
-                                } else {
-                                    // Out of memory.
-                                    fileXioUmount("iso:");
-                                    break;
-                                }
+                                memset(game, 0, sizeof(base_game_info_t));
+                                strcpy(game->startup, startup);
+                                strncpy(game->name, dirent->d_name, NameLen);
+                                game->name[NameLen] = '\0';
+                                strncpy(game->extension, &dirent->d_name[NameLen], sizeof(game->extension));
+                                game->extension[sizeof(game->extension) - 1] = '\0';
                             } else {
                                 // Unable to parse SYSTEM.CNF.
                                 fileXioUmount("iso:");
@@ -360,18 +321,7 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
                         }
                     } else {
                         // Entry was found in cache.
-                        struct game_list_t *next = (struct game_list_t *)malloc(sizeof(struct game_list_t));
-
-                        if (next != NULL) {
-                            next->next = *glist;
-                            *glist = next;
-
-                            game = &(*glist)->gameinfo;
-                            memcpy(game, &cachedGInfo, sizeof(base_game_info_t));
-                        } else {
-                            // Out of memory.
-                            break;
-                        }
+                        memcpy(game, &cachedGInfo, sizeof(base_game_info_t));
                     }
                 }
 
@@ -381,6 +331,8 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
                 game->sizeMB = dirent->d_stat.st_size >> 20;
 
                 count++;
+            } else if (S_ISDIR(dirent->d_stat.st_mode)) {
+                LOG("folder : %s, %x\n", dirent->d_name, S_ISDIR(dirent->d_stat.st_mode));
             }
         }
         closedir(dir);
@@ -389,10 +341,10 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
     }
 
     if (cacheLoaded) {
-        updateISOGameList(path, &cache, *glist, count);
+        updateISOGameList(path, &cache, glist, count);
         freeISOGameListCache(&cache);
     } else {
-        updateISOGameList(path, NULL, *glist, count);
+        updateISOGameList(path, NULL, glist, count);
     }
 
     return count;
@@ -400,31 +352,56 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
 
 int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gamecount)
 {
-    int fd, size, id = 0, result;
-    int count;
+    int result;
+    int filecount = 0;
     char path[256];
     clock_t start, diff;
     start = clock();
-
 
     free(*list);
     *list = NULL;
     *fsize = -1;
     *gamecount = 0;
 
-    // temporary storage for the game names
-    struct game_list_t *dlist_head = NULL;
-
     // count iso games in "cd" directory
     snprintf(path, sizeof(path), "%sCD", prefix);
-    count = scanForISO(path, SCECdPS2CD, &dlist_head);
-
+    DIR *dir;
+    struct dirent *dirent;
+    if ((dir = opendir(path)) != NULL) {
+        while ((dirent = readdir(dir)) != NULL) {
+            if (!strcmp( dirent->d_name, ".") || !strcmp( dirent->d_name, ".." ))
+                continue;
+            if (S_ISREG(dirent->d_stat.st_mode))
+                filecount++;
+        }
+        closedir(dir);
+    }
     // count iso games in "dvd" directory
     snprintf(path, sizeof(path), "%sDVD", prefix);
-    if ((result = scanForISO(path, SCECdPS2DVD, &dlist_head)) >= 0) {
-        count = count < 0 ? result : count + result;
+    if ((dir = opendir(path)) != NULL) {
+        while ((dirent = readdir(dir)) != NULL) {
+            if (!strcmp( dirent->d_name, ".") || !strcmp( dirent->d_name, ".." ))
+                continue;
+            if (S_ISREG(dirent->d_stat.st_mode))
+                filecount++;
+        }
+        closedir(dir);
+    }
+    if (filecount > 0) {
+        *list = (base_game_info_t *)malloc(sizeof(base_game_info_t) * filecount);
     }
 
+    // count iso games in "CD" directory
+    snprintf(path, sizeof(path), "%sCD", prefix);
+    *gamecount = scanForISO(path, SCECdPS2CD, *list);
+
+    // count iso games in "DVD" directory
+    snprintf(path, sizeof(path), "%sDVD", prefix);
+    if ((result = scanForISO(path, SCECdPS2DVD, *list + *gamecount)) >= 0) {
+        *gamecount = *gamecount < 0 ? result : *gamecount + result;
+    }
+
+    /*
     // count and process games in ul.cfg
     snprintf(path, sizeof(path), "%sul.cfg", prefix);
     fd = openFile(path, O_RDONLY);
@@ -459,7 +436,7 @@ int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gam
                     g->format = GAME_FORMAT_USBLD;
                     g->sizeMB = 0;
 
-                    /* TODO: size calculation is very slow
+                    / * TODO: size calculation is very slow
                     implmented some caching, or do not touch at all */
 
                     // calculate total size for individual game
@@ -474,35 +451,17 @@ int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gam
                             g->sizeMB += (getFileSize(ulfd) >> 20);
                             close(ulfd);
                         }
-                    }*/
+                    }* /
                 }
             }
         }
         close(fd);
-    } else if (count > 0) {
-        *list = (base_game_info_t *)malloc(sizeof(base_game_info_t) * count);
-    }
-
-    if (*list != NULL) {
-        // copy the dlist into the list
-        while ((id < count) && dlist_head) {
-            // copy one game, advance
-            struct game_list_t *cur = dlist_head;
-            dlist_head = dlist_head->next;
-
-            memcpy(&(*list)[id++], &cur->gameinfo, sizeof(base_game_info_t));
-            free(cur);
-        }
-    } else
-        count = 0;
-
-    if (count > 0)
-        *gamecount = count;
+    }*/
 
     diff = (clock() - start);
     printf("sbReadList took: %lu milliseconds\n", diff);
 
-    return count;
+    return *gamecount;
 }
 
 extern int probed_fd;
