@@ -81,9 +81,9 @@ void DeviceFSInit(void)
 
     if (!(cdvdman_settings.common.flags & IOPCORE_SMB_FORMAT_USBLD)) {
         if (cdvdman_settings.smb_prefix[0]) {
-            sprintf(tmp_str, "\\%s\\%s\\%s", cdvdman_settings.smb_prefix, cdvdman_settings.common.media == 0x12 ? "CD" : "DVD", cdvdman_settings.filename);
+            sprintf(tmp_str, "\\%s\\%s", cdvdman_settings.smb_prefix, cdvdman_settings.filename);
         } else {
-            sprintf(tmp_str, "\\%s\\%s", cdvdman_settings.common.media == 0x12 ? "CD" : "DVD", cdvdman_settings.filename);
+            sprintf(tmp_str, "\\%s", cdvdman_settings.filename);
         }
 
         smb_OpenAndX(tmp_str, (u8 *)&cdvdman_settings.FIDs[i++], 0);

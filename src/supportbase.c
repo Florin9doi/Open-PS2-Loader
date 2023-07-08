@@ -296,7 +296,25 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
 
     if ((dir = opendir(path)) != NULL) {
         while ((dirent = readdir(dir)) != NULL) {
-            if ((format = isValidIsoName(dirent->d_name, &NameLen)) > 0) {
+            if (S_ISDIR(dirent->d_stat.st_mode)) {
+                if (!strcmp(dirent->d_name, ".") || !strcmp(dirent->d_name, ".."))
+                    continue;
+                struct game_list_t *next = (struct game_list_t *)malloc(sizeof(struct game_list_t));
+                if (next != NULL) {
+                    next->next = *glist;
+                    *glist = next;
+
+                    base_game_info_t *game = &(*glist)->gameinfo;
+                    memset(game, 0, sizeof(base_game_info_t));
+                    snprintf(game->parent, 255, "%s", strchr(path, ':')+1);
+                    snprintf(game->name, ISO_GAME_NAME_MAX, "# %s", dirent->d_name);
+                    game->format = GAME_FORMAT_FOLDER;
+                    count++;
+                } else {
+                    // Out of memory.
+                    break;
+                }
+            } else if ((format = isValidIsoName(dirent->d_name, &NameLen)) > 0) {
                 base_game_info_t *game;
 
                 if (NameLen > ISO_GAME_NAME_MAX)
@@ -312,6 +330,7 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
                         game = &(*glist)->gameinfo;
                         memset(game, 0, sizeof(base_game_info_t));
 
+                        snprintf(game->parent, 255, "%s", strchr(path, ':')+1);
                         strncpy(game->name, &dirent->d_name[GAME_STARTUP_MAX], NameLen);
                         game->name[NameLen] = '\0';
                         strncpy(game->startup, dirent->d_name, GAME_STARTUP_MAX - 1);
@@ -337,6 +356,7 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
                                     game = &(*glist)->gameinfo;
                                     memset(game, 0, sizeof(base_game_info_t));
 
+                                    snprintf(game->parent, 255, "%s", strchr(path, ':')+1);
                                     strcpy(game->startup, startup);
                                     strncpy(game->name, dirent->d_name, NameLen);
                                     game->name[NameLen] = '\0';
@@ -398,7 +418,7 @@ static int scanForISO(char *path, char type, struct game_list_t **glist)
     return count;
 }
 
-int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gamecount)
+int sbReadList(base_game_info_t **list, const char *prefix, const char *subdir, int *fsize, int *gamecount)
 {
     int fd, size, id = 0, result;
     int count;
@@ -412,14 +432,36 @@ int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gam
     // temporary storage for the game names
     struct game_list_t *dlist_head = NULL;
 
-    // count iso games in "cd" directory
-    snprintf(path, sizeof(path), "%sCD", prefix);
-    count = scanForISO(path, SCECdPS2CD, &dlist_head);
+    if (!subdir[0]) {
+        // count iso games in "cd" directory
+        snprintf(path, sizeof(path), "%sCD", prefix);
+        count = scanForISO(path, SCECdPS2CD, &dlist_head);
 
-    // count iso games in "dvd" directory
-    snprintf(path, sizeof(path), "%sDVD", prefix);
-    if ((result = scanForISO(path, SCECdPS2DVD, &dlist_head)) >= 0) {
-        count = count < 0 ? result : count + result;
+        // count iso games in "dvd" directory
+        snprintf(path, sizeof(path), "%sDVD", prefix);
+        if ((result = scanForISO(path, SCECdPS2DVD, &dlist_head)) >= 0) {
+            count = count < 0 ? result : count + result;
+        }
+    } else {
+        snprintf(path, sizeof(path), "%s%s", prefix, subdir);
+        count = scanForISO(path, strncmp(subdir, "CD", 2) == 0 ? SCECdPS2CD : SCECdPS2DVD, &dlist_head);
+
+        struct game_list_t *next = (struct game_list_t *)malloc(sizeof(struct game_list_t));
+        if (next != NULL) {
+            next->next = dlist_head;
+            dlist_head = next;
+
+            base_game_info_t *game = &dlist_head->gameinfo;
+            memset(game, 0, sizeof(base_game_info_t));
+
+            char *pos = strrchr(subdir, '/');
+            if (pos) {
+                snprintf(game->parent, pos-subdir+1, "%s", subdir);
+            }
+            snprintf(game->name, ISO_GAME_NAME_MAX, "# ..");
+            game->format = GAME_FORMAT_FOLDER;
+            count++;
+        }
     }
 
     // count and process games in ul.cfg
@@ -724,10 +766,10 @@ static void sbCreatePath_name(const base_game_info_t *game, char *path, const ch
             snprintf(path, 256, "%sul.%08X.%s.%02x", prefix, USBA_crc32(game_name), game->startup, part);
             break;
         case GAME_FORMAT_ISO:
-            snprintf(path, 256, "%s%s%s%s%s", prefix, (game->media == SCECdPS2CD) ? "CD" : "DVD", sep, game_name, game->extension);
+            snprintf(path, 256, "%s%s%s%s%s", prefix, game->parent, sep, game_name, game->extension);
             break;
         case GAME_FORMAT_OLD_ISO:
-            snprintf(path, 256, "%s%s%s%s.%s%s", prefix, (game->media == SCECdPS2CD) ? "CD" : "DVD", sep, game->startup, game_name, game->extension);
+            snprintf(path, 256, "%s%s%s%s.%s%s", prefix, game->parent, sep, game->startup, game_name, game->extension);
             break;
     }
 }

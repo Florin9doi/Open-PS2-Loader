@@ -20,6 +20,7 @@
 #include "httpclient.h"
 
 static char ethPrefix[40]; // Contains the full path to the folder where all the games are.
+static char ethSubdir[256];
 static char *ethBase;
 static int ethULSizePrev = -2;
 static time_t ethModifiedCDPrev;
@@ -434,6 +435,7 @@ void ethInit(void)
         ethModifiedDVDPrev = 0;
         ethGameCount = 0;
         ethGames = NULL;
+        ethSubdir[0] = 0;
         configGetInt(configGetByType(CONFIG_OPL), "eth_frames_delay", &ethGameList.delay);
         gNetworkStartup = ERROR_ETH_NOT_STARTED;
         ioPutRequest(IO_CUSTOM_SIMPLEACTION, &smbLoadModules);
@@ -490,7 +492,7 @@ static int ethUpdateGameList(void)
         if (gNetworkStartup != 0)
             return 0;
 
-        if ((sbReadList(&ethGames, ethPrefix, &ethULSizePrev, &ethGameCount)) < 0) {
+        if ((sbReadList(&ethGames, ethPrefix, ethSubdir, &ethULSizePrev, &ethGameCount)) < 0) {
             gNetworkStartup = ERROR_ETH_SMB_LISTGAMES;
             ethDisplayErrorStatus();
         }
@@ -570,6 +572,16 @@ static void ethRenameGame(int id, char *newName)
     ethULSizePrev = -2;
 }
 
+static void ethSwitchDir(char *parent, char *path) {
+    if (!strcmp(path, "..")) {
+        snprintf(ethSubdir, sizeof(ethSubdir), "%s", parent);
+    } else {
+        snprintf(ethSubdir, sizeof(ethSubdir), "%s/%s", parent, path);
+    }
+    ethULSizePrev = -2;
+    ioPutRequest(IO_MENU_UPDATE_DEFFERED, &ethGameList.mode);
+}
+
 static void ethLaunchGame(int id, config_set_t *configSet)
 {
     int i, compatmask;
@@ -580,6 +592,11 @@ static void ethLaunchGame(int id, config_set_t *configSet)
     struct cdvdman_settings_smb *settings;
     u32 layer1_start, layer1_offset;
     unsigned short int layer1_part;
+
+    if (game->format == GAME_FORMAT_FOLDER) {
+        ethSwitchDir(game->parent, game->name + 2); // skip "# " prefix
+        return;
+    }
 
     if (!gPCShareName[0]) {
         memcpy(gPCShareName, game->name, sizeof(gPCShareName));
@@ -651,10 +668,10 @@ static void ethLaunchGame(int id, config_set_t *configSet)
 
     switch (game->format) {
         case GAME_FORMAT_OLD_ISO:
-            sprintf(settings->filename, "%s.%s%s", game->startup, game->name, game->extension);
+            sprintf(settings->filename, "%s\\%s.%s%s", game->parent, game->startup, game->name, game->extension);
             break;
         case GAME_FORMAT_ISO:
-            sprintf(settings->filename, "%s%s", game->name, game->extension);
+            sprintf(settings->filename, "%s\\%s%s", game->parent, game->name, game->extension);
             break;
         default: // USBExtreme format.
             sprintf(settings->filename, "ul.%08X.%s", USBA_crc32(game->name), game->startup);

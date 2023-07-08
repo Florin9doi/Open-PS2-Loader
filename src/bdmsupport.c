@@ -18,6 +18,7 @@
 #include <fileXio_rpc.h> // fileXioIoctl, fileXioDevctl
 
 static char bdmPrefix[40]; // Contains the full path to the folder where all the games are.
+static char bdmSubdir[256];
 static int bdmULSizePrev = -2;
 static time_t bdmModifiedCDPrev;
 static time_t bdmModifiedDVDPrev;
@@ -137,6 +138,7 @@ void bdmInit(void)
     bdmModifiedDVDPrev = 0;
     bdmGameCount = 0;
     bdmGames = NULL;
+    bdmSubdir[0] = 0;
     configGetInt(configGetByType(CONFIG_OPL), "usb_frames_delay", &bdmGameList.delay);
     bdmGameList.enabled = 1;
 }
@@ -212,7 +214,7 @@ static int bdmNeedsUpdate(void)
 
 static int bdmUpdateGameList(void)
 {
-    sbReadList(&bdmGames, bdmPrefix, &bdmULSizePrev, &bdmGameCount);
+    sbReadList(&bdmGames, bdmPrefix, bdmSubdir, &bdmULSizePrev, &bdmGameCount);
     return bdmGameCount;
 }
 
@@ -253,6 +255,16 @@ static void bdmRenameGame(int id, char *newName)
     bdmULSizePrev = -2;
 }
 
+static void bdmSwitchDir(char *parent, char *path) {
+    if (!strcmp(path, "..")) {
+        snprintf(bdmSubdir, sizeof(bdmSubdir), "%s", parent);
+    } else {
+        snprintf(bdmSubdir, sizeof(bdmSubdir), "%s/%s", parent, path);
+    }
+    bdmULSizePrev = -2;
+    ioPutRequest(IO_MENU_UPDATE_DEFFERED, &bdmGameList.mode);
+}
+
 void bdmLaunchGame(int id, config_set_t *configSet)
 {
     int i, fd, index, compatmask = 0;
@@ -270,6 +282,11 @@ void bdmLaunchGame(int id, config_set_t *configSet)
         game = &bdmGames[id];
     else
         game = gAutoLaunchBDMGame;
+
+    if (game->format == GAME_FORMAT_FOLDER) {
+        bdmSwitchDir(game->parent, game->name + 2); // skip "# " prefix
+        return;
+    }
 
     char vmc_name[32], vmc_path[256], have_error = 0;
     int vmc_id, size_mcemu_irx = 0;

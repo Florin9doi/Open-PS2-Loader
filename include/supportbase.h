@@ -12,10 +12,12 @@ enum GAME_FORMAT {
     GAME_FORMAT_USBLD = 0,
     GAME_FORMAT_OLD_ISO,
     GAME_FORMAT_ISO,
+    GAME_FORMAT_FOLDER,
 };
 
 typedef struct
 {
+    char parent[255];
     char name[ISO_GAME_NAME_MAX + 1]; // MUST be the higher value from UL / ISO
     char startup[GAME_STARTUP_MAX + 1];
     char extension[ISO_GAME_EXTENSION_MAX + 1];
@@ -40,7 +42,7 @@ typedef struct
 int isValidIsoName(char *name, int *pNameLen);
 int sbIsSameSize(const char *prefix, int prevSize);
 int sbCreateSemaphore(void);
-int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gamecount);
+int sbReadList(base_game_info_t **list, const char *prefix, const char *subdir, int *fsize, int *gamecount);
 int sbPrepare(base_game_info_t *game, config_set_t *configSet, int size_cdvdman, void **cdvdman_irx, int *patchindex);
 void sbUnprepare(void *pCommon);
 void sbRebuildULCfg(base_game_info_t **list, const char *prefix, int gamecount, int excludeID);
