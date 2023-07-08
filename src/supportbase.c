@@ -403,6 +403,9 @@ int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gam
     int fd, size, id = 0, result;
     int count;
     char path[256];
+    clock_t start, diff;
+    start = clock();
+
 
     free(*list);
     *list = NULL;
@@ -495,6 +498,9 @@ int sbReadList(base_game_info_t **list, const char *prefix, int *fsize, int *gam
 
     if (count > 0)
         *gamecount = count;
+
+    diff = (clock() - start);
+    printf("sbReadList took: %lu milliseconds\n", diff);
 
     return count;
 }
